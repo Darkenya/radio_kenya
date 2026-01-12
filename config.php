@@ -1,28 +1,25 @@
 <?php
-// config.php - Neon Connection Setup
-
+// config.php - Neon Connection with Error Handling
 function getDBConnection() {
-    // 1. Look for the Vercel Environment Variable
-    $connection_url = getenv('DATABASE_URL');
+    $connection_url = getenv('DATABASE_URL') ?: 'postgresql://neondb_owner:npg_CwBGz3gD1arA@ep-plain-field-ahzbskq1-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require';
 
-    // 2. Fallback to your Neon string if running locally
-    if (!$connection_url) {
-        $connection_url = 'postgresql://neondb_owner:npg_CwBGz3gD1arA@ep-plain-field-ahzbskq1-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require';
-    }
-
-    // Connect using the PostgreSQL driver
-    $conn = pg_connect($connection_url);
-
-    if (!$conn) {
+    try {
+        // Use @ to suppress the warning so we can handle it cleanly
+        $conn = @pg_connect($connection_url);
+        
+        if (!$conn) {
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Database connection failed. Check your DATABASE_URL.']);
+            exit;
+        }
+        return $conn;
+    } catch (Exception $e) {
         header('Content-Type: application/json');
-        die(json_encode(['error' => 'Could not connect to Neon: ' . pg_last_error()]));
+        echo json_encode(['error' => 'Server Error: ' . $e->getMessage()]);
+        exit;
     }
-
-    return $conn;
 }
 
-// Enable CORS
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE');
 header('Access-Control-Allow-Headers: Content-Type');
-?>
