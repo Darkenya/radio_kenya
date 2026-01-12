@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radio Stream Debug Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-box {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        .btn {
+            padding: 15px 30px;
+            font-size: 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .btn:hover {
+            background: #5568d3;
+        }
+        .btn-danger {
+            background: #f56565;
+        }
+        .log {
+            background: #000;
+            color: #0f0;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+        .log-entry {
+            margin: 5px 0;
+        }
+        .error {
+            color: #ff6b6b;
+        }
+        .success {
+            color: #51cf66;
+        }
+        .info {
+            color: #74c0fc;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            font-size: 14px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .status.playing {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.stopped {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .status.loading {
+            background: #fff3cd;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-box">
+        <h1>📻 Radio Stream Debugger</h1>
+        <p>Test your radio stream URL and see detailed debugging information</p>
+        
+        <div>
+            <label><strong>Enter Stream URL:</strong></label>
+            <input type="text" id="streamUrl" value="https://ice1.somafm.com/groovesalad-128-mp3" placeholder="https://stream.example.com/radio.mp3">
+        </div>
+
+        <div id="status" class="status stopped">⏹️ Stopped</div>
+
+        <div>
+            <button class="btn" onclick="testStream()">▶️ Test Stream</button>
+            <button class="btn btn-danger" onclick="stopStream()">⏹️ Stop</button>
+            <button class="btn" onclick="clearLog()">🗑️ Clear Log</button>
+        </div>
+
+        <div>
+            <label><strong>Volume:</strong></label>
+            <input type="range" id="volume" min="0" max="100" value="50" oninput="changeVolume()" style="width: 100%;">
+            <span id="volumeDisplay">50%</span>
+        </div>
+
+        <h3>Debug Log:</h3>
+        <div id="log" class="log"></div>
+    </div>
+
+    <div class="test-box">
+        <h2>🔍 Database Stream Test</h2>
+        <p>Test streams directly from your database</p>
+        <button class="btn" onclick="loadAndTestDbStreams()">Load Stations from Database</button>
+        <div id="dbStations" style="margin-top: 20px;"></div>
+    </div>
+
+    <audio id="audioPlayer"></audio>
+
+    <script>
+        const audio = document.getElementById('audioPlayer');
+        let logEntries = [];
+
+        // Log function
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const entry = `[${timestamp}] ${message}`;
+            logEntries.push({entry, type});
+            
+            const logDiv = document.getElementById('log');
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry ${type}`;
+            logEntry.textContent = entry;
+            logDiv.appendChild(logEntry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            
+            console.log(entry);
+        }
+
+        // Update status
+        function updateStatus(text, state) {
+            const status = document.getElementById('status');
+            status.textContent = text;
+            status.className = `status ${state}`;
+        }
+
+        // Setup audio event listeners
+        audio.addEventListener('loadstart', () => {
+            log('🔄 Loading stream...', 'info');
+            updateStatus('⏳ Loading...', 'loading');
+        });
+
+        audio.addEventListener('loadeddata', () => {
+            log('✅ Stream data loaded', 'success');
+        });
+
+        audio.addEventListener('canplay', () => {
+            log('✅ Stream ready to play', 'success');
+        });
+
+        audio.addEventListener('canplaythrough', () => {
+            log('✅ Stream can play without buffering', 'success');
+        });
+
+        audio.addEventListener('playing', () => {
+            log('▶️ Stream is now playing!', 'success');
+            updateStatus('▶️ Playing', 'playing');
+        });
+
+        audio.addEventListener('pause', () => {
+            log('⏸️ Stream paused', 'info');
+            updateStatus('⏸️ Paused', 'stopped');
+        });
+
+        audio.addEventListener('ended', () => {
+            log('⏹️ Stream ended', 'info');
+            updateStatus('⏹️ Stopped', 'stopped');
+        });
+
+        audio.addEventListener('waiting', () => {
+            log('⏳ Buffering...', 'info');
+            updateStatus('⏳ Buffering...', 'loading');
+        });
+
+        audio.addEventListener('stalled', () => {
+            log('⚠️ Stream stalled', 'error');
+        });
+
+        audio.addEventListener('error', (e) => {
+            const errorMessages = {
+                1: 'MEDIA_ERR_ABORTED - Playback aborted by user',
+                2: 'MEDIA_ERR_NETWORK - Network error, stream unreachable',
+                3: 'MEDIA_ERR_DECODE - Audio decoding failed, corrupt or unsupported format',
+                4: 'MEDIA_ERR_SRC_NOT_SUPPORTED - Stream URL not supported or invalid'
+            };
+            
+            const errorCode = audio.error ? audio.error.code : 'unknown';
+            const errorMsg = errorMessages[errorCode] || 'Unknown error';
+            
+            log(`❌ ERROR (Code ${errorCode}): ${errorMsg}`, 'error');
+            log(`❌ Stream URL: ${audio.src}`, 'error');
+            updateStatus('❌ Error', 'stopped');
+        });
+
+        audio.addEventListener('abort', () => {
+            log('⚠️ Stream loading aborted', 'error');
+        });
+
+        audio.addEventListener('suspend', () => {
+            log('⏸️ Stream loading suspended', 'info');
+        });
+
+        audio.addEventListener('progress', () => {
+            log('📶 Loading progress...', 'info');
+        });
+
+        audio.addEventListener('timeupdate', () => {
+            // Only log occasionally to avoid spam
+            if (Math.floor(audio.currentTime) % 10 === 0) {
+                log(`⏱️ Playing time: ${Math.floor(audio.currentTime)}s`, 'info');
+            }
+        });
+
+        audio.addEventListener('volumechange', () => {
+            log(`🔊 Volume changed to ${Math.round(audio.volume * 100)}%`, 'info');
+        });
+
+        // Test stream function
+        async function testStream() {
+            const url = document.getElementById('streamUrl').value.trim();
+            
+            if (!url) {
+                log('❌ Please enter a stream URL', 'error');
+                return;
+            }
+
+            log('═══════════════════════════════════════', 'info');
+            log(`🧪 Testing stream: ${url}`, 'info');
+            log('═══════════════════════════════════════', 'info');
+
+            // Stop any current playback
+            audio.pause();
+            audio.currentTime = 0;
+
+            // Set new source
+            log('📝 Setting audio source...', 'info');
+            audio.src = url;
+            audio.volume = document.getElementById('volume').value / 100;
+
+            // Load the audio
+            log('🔄 Calling audio.load()...', 'info');
+            audio.load();
+
+            // Try to play
+            log('▶️ Attempting to play...', 'info');
+            
+            try {
+                const playPromise = audio.play();
+                
+                if (playPromise !== undefined) {
+                    playPromise.then(() => {
+                        log('🎉 SUCCESS! Stream is playing!', 'success');
+                    }).catch(error => {
+                        log(`❌ Play failed: ${error.name} - ${error.message}`, 'error');
+                        
+                        if (error.name === 'NotAllowedError') {
+                            log('ℹ️ Browser blocked autoplay. User interaction may be required.', 'info');
+                        } else if (error.name === 'NotSupportedError') {
+                            log('ℹ️ Audio format not supported by browser', 'error');
+                        }
+                    });
+                }
+            } catch (error) {
+                log(`❌ Exception: ${error.message}`, 'error');
+            }
+        }
+
+        // Stop stream
+        function stopStream() {
+            log('⏹️ Stopping stream...', 'info');
+            audio.pause();
+            audio.currentTime = 0;
+            audio.src = '';
+            updateStatus('⏹️ Stopped', 'stopped');
+        }
+
+        // Change volume
+        function changeVolume() {
+            const volume = document.getElementById('volume').value;
+            audio.volume = volume / 100;
+            document.getElementById('volumeDisplay').textContent = volume + '%';
+        }
+
+        // Clear log
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+            logEntries = [];
+            log('🗑️ Log cleared', 'info');
+        }
+
+        // Load and test database streams
+        async function loadAndTestDbStreams() {
+            const container = document.getElementById('dbStations');
+            container.innerHTML = '<p>Loading stations from database...</p>';
+
+            try {
+                const response = await fetch('api.php?action=get_stations');
+                const stations = await response.json();
+
+                if (stations.length === 0) {
+                    container.innerHTML = '<p style="color: red;">No stations found in database!</p>';
+                    log('❌ No stations in database', 'error');
+                    return;
+                }
+
+                log(`✅ Loaded ${stations.length} stations from database`, 'success');
+
+                container.innerHTML = '<h3>Stations in Database:</h3>';
+                
+                stations.forEach(station => {
+                    const stationDiv = document.createElement('div');
+                    stationDiv.style.cssText = 'background: #f0f0f0; padding: 15px; margin: 10px 0; border-radius: 5px;';
+                    stationDiv.innerHTML = `
+                        <strong>${station.logo} ${station.name}</strong> - ${station.frequency}<br>
+                        <small style="color: #666;">Genre: ${station.genre} | City: ${station.city}</small><br>
+                        <small style="color: #666; word-break: break-all;">Stream: ${station.stream_url}</small><br>
+                        <button class="btn" onclick="testSpecificStream('${station.stream_url.replace(/'/g, "\\'")}', '${station.name.replace(/'/g, "\\'")}')">▶️ Test This Stream</button>
+                    `;
+                    container.appendChild(stationDiv);
+                });
+
+            } catch (error) {
+                container.innerHTML = `<p style="color: red;">Error loading stations: ${error.message}</p>`;
+                log(`❌ Error loading stations: ${error.message}`, 'error');
+            }
+        }
+
+        // Test specific stream
+        function testSpecificStream(url, name) {
+            document.getElementById('streamUrl').value = url;
+            log(`🎵 Testing station: ${name}`, 'info');
+            testStream();
+        }
+
+        // Initial log entry
+        log('🚀 Radio Stream Debugger ready!', 'success');
+        log('ℹ️ Enter a stream URL and click "Test Stream" to begin', 'info');
+    </script>
+</body>
+</html>
